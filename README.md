@@ -1,5 +1,8 @@
 # Sales & Distribution Analytics Platform
 
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/31f63355-b25b-4011-aa33-b77a0955a260" />
+
+
 ## Overview
 
 This project demonstrates an end-to-end Analytics Engineering solution using the **Medallion Architecture (Bronze → Silver → Gold)**.
