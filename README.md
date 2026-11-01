@@ -131,12 +131,8 @@ customers.to_sql(
 raw.customer_master
 ```
 
-Example Bronze Data:
+<img width="1600" height="1000" alt="image" src="https://github.com/user-attachments/assets/3927a14b-7d86-493f-a77c-16d0855d9460" />
 
-| customer_id | customer_name | status | _source_file |
-|------------|------------|------------|------------|
-| C001 | ABC Store | Active | SRC03_customer_master.csv |
-| C002 | XYZ Shop | Active | SRC03_customer_master.csv |
 
 ---
 
