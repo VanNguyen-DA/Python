@@ -141,43 +141,48 @@ raw.customer_master
 ```python
 import os
 import uuid
-import pandas as pd
-
 from datetime import datetime
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
+import pandas as pd
 
+# 1. Nạp cấu hình .env
 load_dotenv()
 
-connection_string = (
-    f"postgresql+psycopg2://"
-    f"{os.getenv('DB_USER')}:"
-    f"{os.getenv('DB_PASSWORD')}@"
-    f"{os.getenv('DB_HOST')}:"
-    f"{os.getenv('DB_PORT')}/"
-    f"{os.getenv('DB_NAME')}"
-)
+db_host = os.getenv("DB_HOST")
+db_port = os.getenv("DB_PORT")
+db_user = os.getenv("DB_USER")
+db_password = os.getenv("DB_PASSWORD")
+db_name = os.getenv("DB_NAME")
 
+# 2. Khởi tạo Engine kết nối PostgreSQL
+connection_string = f"postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 engine = create_engine(connection_string)
 
-customers = pd.read_csv(
-    "SRC03_customer_master.csv"
-)
+# 3. Đọc dữ liệu từ file CSV
+file_path = "/Users/beatrice/Desktop/VietDist_SampleData/Raw/SRC03_customer_master.csv"
+customers = pd.read_csv(file_path)
 
+# 4. Chuẩn Bronze Layer: Ép về TEXT và thêm 4 cột Metadata
 customers = customers.astype(str)
-
 customers['_source_file'] = "SRC03_customer_master.csv"
 customers['_source_platform'] = "local_storage"
 customers['_ingested_at'] = datetime.now()
 customers['_batch_id'] = str(uuid.uuid4())
 
-customers.to_sql(
-    "customer_master",
-    schema="raw",
-    con=engine,
-    if_exists="replace",
-    index=False
-)
+# 5. Đẩy vào schema raw
+print("\n--- Đang tiến hành đẩy dữ liệu CUSTOMER vào PostgreSQL... ---")
+try:
+    customers.to_sql(
+        name='customer_master',
+        con=engine,
+        schema='raw',
+        if_exists='replace',
+        index=False
+    )
+    print("🎉 Thành công! Đã đẩy dữ liệu vào raw.customer_master")
+except Exception as e:
+    print("❌ Thất bại. Lỗi:", e)
 ```
 
 ---
@@ -234,10 +239,8 @@ ADD PRIMARY KEY(customer_id);
 DROP TABLE IF EXISTS staging.stg_customer_master;
 
 CREATE TABLE staging.stg_customer_master AS
-
 WITH deduped AS (
-
-    SELECT
+    SELECT 
         TRIM(customer_id)::VARCHAR(50) AS customer_id,
         TRIM(customer_name)::VARCHAR(255) AS customer_name,
         TRIM(customer_type)::VARCHAR(100) AS customer_type,
@@ -250,27 +253,18 @@ WITH deduped AS (
         join_date::DATE AS join_date,
         credit_limit::NUMERIC(18,2) AS credit_limit,
         TRIM(status)::VARCHAR(50) AS status,
-
-        _source_file,
-        _source_platform,
-        _ingested_at,
-        _batch_id,
-
-        ROW_NUMBER() OVER (
-            PARTITION BY customer_id
-            ORDER BY _ingested_at DESC
-        ) AS rn
-
+        _source_file, _source_platform, _ingested_at, _batch_id,
+        ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY _ingested_at DESC) AS rn
     FROM raw.customer_master
-
-    WHERE customer_id IS NOT NULL
+    WHERE customer_id IS NOT NULL AND TRIM(customer_id) <> ''
 )
+SELECT 
+    customer_id, customer_name, customer_type, channel, province, region, 
+    address, phone, tax_code, join_date, credit_limit, status,
+    _source_file, _source_platform, _ingested_at, _batch_id
+FROM deduped WHERE rn = 1;
 
-SELECT *
-
-FROM deduped
-
-WHERE rn = 1;
+ALTER TABLE staging.stg_customer_master ADD PRIMARY KEY (customer_id);
 ```
 
 ### Result
@@ -324,67 +318,28 @@ Distributor Performance Mart
 DROP TABLE IF EXISTS dwh.mart_distributor_performance;
 
 CREATE TABLE dwh.mart_distributor_performance AS
-
-SELECT
-
+SELECT 
     distributor_id,
     order_month,
     order_quarter,
-
     COUNT(DISTINCT order_id) AS total_orders_placed,
-
     SUM(qty_ordered) AS total_qty_ordered,
-
     SUM(qty_delivered) AS total_qty_delivered,
-
-    CASE
-        WHEN SUM(qty_ordered) > 0
-        THEN ROUND(
-            (
-                SUM(qty_delivered)::NUMERIC
-                /
-                SUM(qty_ordered)
-            ) * 100,
-            2
-        )
-        ELSE 0
+    CASE 
+        WHEN SUM(qty_ordered) > 0 
+        THEN ROUND((SUM(qty_delivered)::NUMERIC / SUM(qty_ordered)) * 100, 2)
+        ELSE 0 
     END AS actual_fill_rate_pct,
-
     SUM(gross_amount) AS total_gross_value,
-
     SUM(delivered_amount) AS total_delivered_value,
-
-    COUNT(
-        DISTINCT CASE
-            WHEN ontime_delivery = 'Yes'
-            THEN order_id
-        END
-    ) AS ontime_orders_count,
-
-    CASE
-        WHEN COUNT(DISTINCT order_id) > 0
-        THEN ROUND(
-            (
-                COUNT(
-                    DISTINCT CASE
-                    WHEN ontime_delivery = 'Yes'
-                    THEN order_id
-                    END
-                )::NUMERIC
-                /
-                COUNT(DISTINCT order_id)
-            ) * 100,
-            2
-        )
-        ELSE 0
+    COUNT(DISTINCT CASE WHEN ontime_delivery = 'Yes' THEN order_id END) AS ontime_orders_count,
+    CASE 
+        WHEN COUNT(DISTINCT order_id) > 0 
+        THEN ROUND((COUNT(DISTINCT CASE WHEN ontime_delivery = 'Yes' THEN order_id END)::NUMERIC / COUNT(DISTINCT order_id)) * 100, 2)
+        ELSE 0 
     END AS ontime_delivery_rate_pct
-
 FROM staging.stg_distributor_orders
-
-GROUP BY
-    distributor_id,
-    order_month,
-    order_quarter;
+GROUP BY distributor_id, order_month, order_quarter;
 ```
 
 ---
